@@ -1,0 +1,13 @@
+{
+  "name": "gdt-booking-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monitoreo sintético del booking form de global-dt.com (Playwright + GitHub Actions)",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.0",
+    "typescript": "^5.5.4"
+  }
+}

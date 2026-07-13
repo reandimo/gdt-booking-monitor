@@ -1,0 +1,93 @@
+name: Booking monitor
+
+# Monitoreo sintético del booking de global-dt.com cada 30 min.
+# En fallo: sube el reporte de Playwright como artifact y abre (o comenta) un
+# issue etiquetado `incident`; GitHub además manda email por el fallo del
+# workflow. Al recuperarse, cierra el issue solo.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+  actions: write # keepalive: re-habilitar el propio workflow
+
+concurrency:
+  group: booking-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - name: Correr checks contra prod
+        run: pnpm test
+
+      - name: Subir reporte de Playwright
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+
+      - name: Abrir o actualizar issue de incidente
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          num=$(gh issue list --label incident --state open --json number --jq '.[0].number // empty')
+          if [ -z "$num" ]; then
+            gh issue create \
+              --title "🔴 Booking de global-dt.com FALLANDO ($(date -u +'%Y-%m-%d %H:%M UTC'))" \
+              --label incident \
+              --body "El monitor sintético del booking falló 3 intentos seguidos.
+
+**Run:** $run_url
+**Reporte:** artifact \`playwright-report-${{ github.run_id }}\` en el run (screenshots + trace).
+
+Este issue se cierra solo cuando el monitor vuelva a pasar."
+          else
+            gh issue comment "$num" --body "Sigue fallando: $run_url"
+          fi
+
+      - name: Cerrar incidente si se recuperó
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          num=$(gh issue list --label incident --state open --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue close "$num" --comment "✅ Recuperado: $run_url"
+          fi
+
+      # GitHub desactiva los workflows con cron tras 60 días sin actividad en el
+      # repo; re-habilitarlo en cada corrida exitosa resetea ese contador.
+      - name: Keepalive del cron
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/monitor.yml/enable"
