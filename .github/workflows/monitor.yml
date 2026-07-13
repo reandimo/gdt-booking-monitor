@@ -8,7 +8,12 @@ name: Booking monitor
 on:
   schedule:
     - cron: '*/30 * * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Override de BASE_URL (p. ej. para probar el camino de alerta)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -40,6 +45,8 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
 
       - name: Correr checks contra prod
+        env:
+          BASE_URL: ${{ inputs.base_url || 'https://global-dt.com' }}
         run: pnpm test
 
       - name: Subir reporte de Playwright
